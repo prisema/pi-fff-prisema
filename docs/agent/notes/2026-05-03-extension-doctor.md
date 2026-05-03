@@ -27,7 +27,7 @@ O script externo `bun run doctor` já detecta problemas antes/depois de instalar
 ```bash
 bun run typecheck
 bun run smoke .
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
+bun run smoke .
 bun run doctor
 ```
 
@@ -45,7 +45,7 @@ Passou:
 ```bash
 bun run typecheck
 bun run smoke .
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
+bun run smoke .
 bun run doctor
 ```
 

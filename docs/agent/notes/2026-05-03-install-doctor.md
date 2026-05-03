@@ -6,18 +6,12 @@ Clarificar instalação do `pi-fff-prisema` e avisar quando o ambiente Pi tiver 
 
 ## Context
 
-Após rodar `bash scripts/install-local.sh`, o Pi mostrou instalação por path local:
-
-```text
-Installing /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema...
-```
-
-Isso não escreve no `.pi/settings.json` do projeto; `pi install` sem `-l` escreve no settings global `~/.pi/agent/settings.json`. Porém a fonte instalada era o checkout local, o que é correto para desenvolvimento mas confuso para uso normal/global.
+Após rodar `bash scripts/install-local.sh`, o Pi mostrou instalação por path local. Isso não escreve no `.pi/settings.json` do projeto; `pi install` sem `-l` escreve no settings global `~/.pi/agent/settings.json`. Porém a fonte instalada era o checkout local, o que é correto para desenvolvimento mas confuso para uso normal/global.
 
 Também foi detectado que havia duas fontes instaladas no settings global:
 
 - `git:github.com/prisema/pi-fff-prisema`
-- `../../Projetos/MeusProjetos/pi-fff-prisema`
+- um checkout local do mesmo pacote
 
 ## Decisions
 
@@ -33,7 +27,7 @@ Também foi detectado que havia duas fontes instaladas no settings global:
 bun run doctor
 bun run typecheck
 bun run smoke .
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
+bun run smoke .
 ```
 
 ## Files changed
@@ -52,7 +46,7 @@ Passou:
 ```bash
 bun run typecheck
 bun run smoke .
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
+bun run smoke .
 ```
 
 `bun run doctor` detectou corretamente a duplicidade atual e sugeriu os install scripts.

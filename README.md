@@ -58,7 +58,7 @@ Não carrega autocomplete `@` customizado. Intencional: menor superfície de FD 
 ### Uso normal/global via GitHub
 
 ```bash
-cd /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema
+cd pi-fff-prisema
 bash scripts/install-global.sh
 ```
 
@@ -67,7 +67,7 @@ Esse caminho instala `git:github.com/prisema/pi-fff-prisema` no settings global 
 ### Desenvolvimento local
 
 ```bash
-cd /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema
+cd pi-fff-prisema
 bash scripts/install-local.sh
 ```
 
@@ -102,7 +102,7 @@ Nesse modo as tools viram:
 Depois de validar localmente:
 
 ```bash
-cd /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema
+cd pi-fff-prisema
 git init
 git add .
 git commit -m "feat: add PFFPrisema safe FFF Pi extension"
@@ -128,7 +128,7 @@ gh repo create prisema/pi-fff-prisema --public --source=. --remote=origin --push
 Dentro de uma sessão Pi:
 
 ```bash
-bash /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema/scripts/check-pi-fds.sh
+bash scripts/check-pi-fds.sh
 ```
 
 Antes, vimos ~12k FDs e milhares de `DIR`. Com watcher desligado, esperado é ficar baixo/estável.

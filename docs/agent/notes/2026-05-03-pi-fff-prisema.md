@@ -2,7 +2,7 @@
 
 ## Goal
 
-Criar uma extensão Pi própria (`PFFPrisema`, package `pi-pff-prisema`) em `/Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema` para usar FFF com configuração segura em sessões longas.
+Criar uma extensão Pi própria (`PFFPrisema`, package `pi-pff-prisema`) para usar FFF com configuração segura em sessões longas.
 
 ## Context
 
@@ -51,10 +51,9 @@ A sessão Pi começou a apresentar `spawn EBADF` ao rodar comandos shell. Inspe�
 Pendente neste ponto:
 
 ```bash
-cd /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema
 bun install
 bun run typecheck
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
+bun run smoke .
 ```
 
 ## Risks
@@ -66,5 +65,5 @@ bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
 ## Next
 
 - Rodar install/typecheck/smoke.
-- Instalar localmente com `pi install /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema` após remover `npm:@ff-labs/pi-fff`.
+- Instalar localmente com `pi install /path/to/checkout` após remover `npm:@ff-labs/pi-fff`.
 - Abrir nova sessão Pi e monitorar FD count.

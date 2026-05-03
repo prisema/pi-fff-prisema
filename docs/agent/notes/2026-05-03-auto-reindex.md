@@ -26,7 +26,7 @@ Automatizar reindex seguro porque o watcher nativo fica desligado por padrão pa
 ```bash
 bun run typecheck
 bun run smoke .
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
+bun run smoke .
 bun run doctor
 ```
 
@@ -44,7 +44,7 @@ Passou:
 ```bash
 bun run typecheck
 bun run smoke .
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
+bun run smoke .
 bun run doctor
 ```
 

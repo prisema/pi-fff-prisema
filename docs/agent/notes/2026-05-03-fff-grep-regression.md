@@ -29,7 +29,7 @@ Causa raiz confirmada: `buildGrepQuery()` normalizava `src/` para `src`, mas o F
 bun install
 bun run typecheck
 bun run smoke .
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
+bun run smoke .
 ```
 
 Testes diretos via tools Pi ativas também foram executados:
@@ -56,7 +56,7 @@ Passou:
 ```bash
 bun run typecheck
 bun run smoke .
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
+bun run smoke .
 ```
 
 Smoke cobre:

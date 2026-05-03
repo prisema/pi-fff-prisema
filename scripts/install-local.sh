@@ -16,7 +16,7 @@ echo
 cd "${ROOT}"
 bun install
 bun run typecheck
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
+bun run smoke .
 
 # Remove possíveis fontes que registram os mesmos tool names (fffind/ffgrep/fff-multi-grep).
 pi remove npm:@ff-labs/pi-fff || true
