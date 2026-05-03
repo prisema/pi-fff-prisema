@@ -161,6 +161,19 @@ async function smokePiTools(fixture) {
     });
     assert(multiOutput.includes("registerTool"), `fff-multi-grep constraint failed:\n${multiOutput}`);
 
+    await writeFile(join(fixture, "src", "generated.ts"), "export const generatedBySmoke = true;\n");
+    await harness.handlers.get("tool_result")?.({
+      type: "tool_result",
+      toolCallId: "smoke-write",
+      toolName: "write",
+      input: { path: "src/generated.ts" },
+      content: [],
+      isError: false,
+      details: undefined,
+    });
+    const autoReindexOutput = await runTool("fffind", { pattern: "generated", path: "src/", limit: 5 });
+    assert(autoReindexOutput.includes("src/generated.ts"), `auto reindex after write failed:\n${autoReindexOutput}`);
+
     const doctor = harness.commands.get("fff-prisema-doctor");
     assert(doctor, "missing registered command: fff-prisema-doctor");
     await doctor.handler("", harness.ctx);
@@ -177,6 +190,7 @@ async function smokePiTools(fixture) {
       grepGlob,
       grepRegex,
       multiOutput,
+      autoReindexOutput,
       doctorOutput: doctorWidget.lines,
     };
   } finally {

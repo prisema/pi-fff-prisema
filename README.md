@@ -34,7 +34,7 @@ Por padrão, `FileFinder.create()` usa:
 
 Isso segue a linha do `opencode-fff-search`: busca rápida em memória, mas sem watcher nativo, sem mmap cache, sem content index e sem DB/frecency por padrão.
 
-Tradeoff: arquivos criados depois do start podem não aparecer até `/fff-prisema-reindex` ou reiniciar Pi.
+Tradeoff: watcher desligado não recebe eventos do sistema de arquivos. A extensão compensa com auto-reindex seguro após `edit`/`write`/comandos shell mutantes e em buscas sem resultado, com intervalo mínimo configurável. `/fff-prisema-reindex` continua disponível para rescan manual.
 
 ## Ferramentas
 
@@ -119,6 +119,8 @@ gh repo create prisema/pi-fff-prisema --public --source=. --remote=origin --push
 | `PI_FFF_PRISEMA_AI_MODE` | `false` | `1` religa modo AI/frecency |
 | `PI_FFF_PRISEMA_SCAN_TIMEOUT_MS` | `15000` | timeout de scan inicial |
 | `PI_FFF_PRISEMA_GREP_TIME_BUDGET_MS` | `5000` | orçamento por grep |
+| `PI_FFF_PRISEMA_AUTO_REINDEX` | `true` | `0` desliga reindex automático quando watcher está off |
+| `PI_FFF_PRISEMA_AUTO_REINDEX_MIN_INTERVAL_MS` | `30000` | intervalo mínimo para retry com reindex em buscas sem resultado |
 | `PI_FFF_PRISEMA_PREFIX` | vazio | prefixo para tool names |
 
 ## Verificar FD leak no Pi

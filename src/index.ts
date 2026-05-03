@@ -11,6 +11,7 @@ const DEFAULT_GREP_LIMIT = 100;
 const DEFAULT_MAX_MATCHES_PER_FILE = 50;
 const DEFAULT_SCAN_TIMEOUT_MS = 15_000;
 const DEFAULT_GREP_TIME_BUDGET_MS = 5_000;
+const DEFAULT_AUTO_REINDEX_MIN_INTERVAL_MS = 30_000;
 const MAX_OUTPUT_CHARS = 48_000;
 const MAX_OUTPUT_LINES = 1_500;
 const MAX_CURSOR_CACHE = 200;
@@ -23,6 +24,7 @@ type RuntimeState = {
   scanPromise: Promise<void>;
   scanTimedOut: boolean;
   initializedAt: Date;
+  lastScanAt: Date;
 };
 
 type SafeOptions = {
@@ -32,6 +34,8 @@ type SafeOptions = {
   disableWatch: boolean;
   scanTimeoutMs: number;
   grepTimeBudgetMs: number;
+  autoReindex: boolean;
+  autoReindexMinIntervalMs: number;
 };
 
 type ToolNames = {
@@ -233,7 +237,15 @@ function parseSafeOptions(): SafeOptions {
     disableWatch: envBool("PI_FFF_PRISEMA_DISABLE_WATCH", true),
     scanTimeoutMs: envNumber("PI_FFF_PRISEMA_SCAN_TIMEOUT_MS", DEFAULT_SCAN_TIMEOUT_MS),
     grepTimeBudgetMs: envNumber("PI_FFF_PRISEMA_GREP_TIME_BUDGET_MS", DEFAULT_GREP_TIME_BUDGET_MS),
+    autoReindex: envBool("PI_FFF_PRISEMA_AUTO_REINDEX", true),
+    autoReindexMinIntervalMs: envNumber("PI_FFF_PRISEMA_AUTO_REINDEX_MIN_INTERVAL_MS", DEFAULT_AUTO_REINDEX_MIN_INTERVAL_MS),
   };
+}
+
+function commandMayMutateFiles(command: string): boolean {
+  const startsMutatingCommand = /(^|[;&|]\s*)(touch|mkdir|mv|cp|rm|git\s+(pull|checkout|switch|merge|reset|clean|clone|apply)|bun\s+(install|add|remove)|npm\s+(install|i|add|remove)|pnpm\s+(install|add|remove)|yarn\s+(install|add|remove))\b/u;
+  const writesToFile = /(^|[^2])>\s*\S|\btee\s+/u;
+  return startsMutatingCommand.test(command) || writesToFile.test(command);
 }
 
 function toolNamesFromPrefix(prefix: string): ToolNames {
@@ -309,6 +321,7 @@ function doctorReport(cwd: string, safeOptions: SafeOptions, state: RuntimeState
   if (!safeOptions.disableMmapCache) warnings.push("PI_FFF_PRISEMA_DISABLE_MMAP_CACHE=0; mmap cache enabled");
   if (!safeOptions.disableContentIndexing) warnings.push("PI_FFF_PRISEMA_DISABLE_CONTENT_INDEXING=0; content index enabled");
   if (safeOptions.aiMode) warnings.push("PI_FFF_PRISEMA_AI_MODE=1; frecency/history mode enabled");
+  if (safeOptions.disableWatch && !safeOptions.autoReindex) warnings.push("watch disabled and auto reindex disabled; new files require manual /fff-prisema-reindex");
   if (state?.scanTimedOut) warnings.push("initial FFF scan timed out; results may be incomplete until /fff-prisema-reindex");
 
   const lines = [
@@ -324,6 +337,8 @@ function doctorReport(cwd: string, safeOptions: SafeOptions, state: RuntimeState
     `  disableMmapCache=${safeOptions.disableMmapCache}`,
     `  disableContentIndexing=${safeOptions.disableContentIndexing}`,
     `  disableWatch=${safeOptions.disableWatch}`,
+    `  autoReindex=${safeOptions.autoReindex}`,
+    `  autoReindexMinIntervalMs=${safeOptions.autoReindexMinIntervalMs}`,
   ];
 
   if (warnings.length > 0) {
@@ -346,6 +361,7 @@ export default function piFffPrisema(pi: ExtensionAPI) {
   const safeOptions = parseSafeOptions();
   const prefix = (pi.getFlag("fff-prisema-prefix") as string | undefined) ?? process.env.PI_FFF_PRISEMA_PREFIX ?? "";
   const tools = toolNamesFromPrefix(prefix);
+  let filesystemMayBeDirty = false;
 
   function destroyFinder() {
     if (state?.finder && !state.finder.isDestroyed) {
@@ -354,6 +370,28 @@ export default function piFffPrisema(pi: ExtensionAPI) {
     state = null;
     initPromise = null;
     cursorCache.clear();
+  }
+
+  function markScanFinished(runtime: RuntimeState, scanCompleted: boolean) {
+    runtime.lastScanAt = new Date();
+    runtime.scanTimedOut = !scanCompleted;
+    filesystemMayBeDirty = false;
+  }
+
+  async function rescanRuntime(runtime: RuntimeState): Promise<boolean> {
+    const result = runtime.finder.scanFiles();
+    if (!result.ok) return false;
+    const scan = await runtime.finder.waitForScan(safeOptions.scanTimeoutMs);
+    const completed = scan.ok ? scan.value : false;
+    markScanFinished(runtime, completed);
+    return completed;
+  }
+
+  async function maybeAutoReindex(runtime: RuntimeState, reason: "dirty" | "miss"): Promise<boolean> {
+    if (!safeOptions.disableWatch || !safeOptions.autoReindex) return false;
+    if (reason === "dirty" && !filesystemMayBeDirty) return false;
+    if (reason === "miss" && Date.now() - runtime.lastScanAt.getTime() < safeOptions.autoReindexMinIntervalMs) return false;
+    return rescanRuntime(runtime);
   }
 
   async function ensureFinder(cwd = activeCwd): Promise<RuntimeState> {
@@ -383,6 +421,7 @@ export default function piFffPrisema(pi: ExtensionAPI) {
           cwd,
           finder,
           initializedAt: new Date(),
+          lastScanAt: new Date(),
           scanTimedOut: false,
           scanPromise: Promise.resolve(),
         };
@@ -390,7 +429,7 @@ export default function piFffPrisema(pi: ExtensionAPI) {
         runtime.scanPromise = finder
           .waitForScan(safeOptions.scanTimeoutMs)
           .then((result) => {
-            runtime.scanTimedOut = result.ok ? !result.value : true;
+            markScanFinished(runtime, result.ok ? result.value : false);
           })
           .catch(() => {
             runtime.scanTimedOut = true;
@@ -434,7 +473,10 @@ export default function piFffPrisema(pi: ExtensionAPI) {
       `isScanning=${scanning}`,
       `scanTimedOut=${state.scanTimedOut}`,
       `initializedAt=${state.initializedAt.toISOString()}`,
+      `lastScanAt=${state.lastScanAt.toISOString()}`,
+      `filesystemMayBeDirty=${filesystemMayBeDirty}`,
       optionsLine,
+      `autoReindex=${safeOptions.autoReindex} autoReindexMinIntervalMs=${safeOptions.autoReindexMinIntervalMs}`,
       `tools=${tools.find}, ${tools.grep}, ${tools.multiGrep}`,
     ];
   }
@@ -455,6 +497,18 @@ export default function piFffPrisema(pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async () => {
     destroyFinder();
+  });
+
+  pi.on("tool_result", async (event) => {
+    if (event.isError) return;
+    if (event.toolName === "edit" || event.toolName === "write") {
+      filesystemMayBeDirty = true;
+      return;
+    }
+
+    if (event.toolName === "bash" && typeof event.input?.command === "string" && commandMayMutateFiles(event.input.command)) {
+      filesystemMayBeDirty = true;
+    }
   });
 
   pi.registerCommand("fff-prisema-status", {
@@ -480,12 +534,8 @@ export default function piFffPrisema(pi: ExtensionAPI) {
     description: "Rescan current project with the existing safe FFF runtime",
     handler: async (_args, ctx) => {
       const runtime = await ensureFinder(activeCwd);
-      const result = runtime.finder.scanFiles();
-      if (!result.ok) {
-        ctx.ui.notify(`FFF rescan failed: ${result.error}`, "error");
-        return;
-      }
-      await runtime.finder.waitForScan(safeOptions.scanTimeoutMs);
+      const completed = await rescanRuntime(runtime);
+      if (!completed) ctx.ui.notify("FFF rescan did not complete before timeout", "warning");
       ctx.ui.setWidget("fff-prisema-status", statusLines());
     },
   });
@@ -520,8 +570,13 @@ export default function piFffPrisema(pi: ExtensionAPI) {
 
       const limit = Math.max(1, params.limit ?? DEFAULT_FIND_LIMIT);
       const query = buildFindQuery(params.pattern, params.path);
-      const result = runtime.finder.fileSearch(query, { pageSize: Math.max(limit, 100) });
+      await maybeAutoReindex(runtime, "dirty");
+      let result = runtime.finder.fileSearch(query, { pageSize: Math.max(limit, 100) });
       if (!result.ok) throw new Error(result.error);
+      if (result.value.items.length === 0 && await maybeAutoReindex(runtime, "miss")) {
+        result = runtime.finder.fileSearch(query, { pageSize: Math.max(limit, 100) });
+        if (!result.ok) throw new Error(result.error);
+      }
       return content(formatFindOutput(result.value, limit, params.path));
     },
   });
@@ -553,7 +608,8 @@ export default function piFffPrisema(pi: ExtensionAPI) {
       const limit = Math.max(1, params.limit ?? DEFAULT_GREP_LIMIT);
       const mode: GrepMode = params.literal === false ? "regex" : "plain";
       const cursor = getCursor(params.cursor);
-      const result = runtime.finder.grep(buildGrepQuery(params.pattern, params.path, runtime.cwd), {
+      const query = buildGrepQuery(params.pattern, params.path, runtime.cwd);
+      const grepOptions = {
         mode,
         smartCase: true,
         cursor: cursor ?? null,
@@ -561,9 +617,15 @@ export default function piFffPrisema(pi: ExtensionAPI) {
         beforeContext: params.context ?? 0,
         afterContext: params.context ?? 0,
         timeBudgetMs: safeOptions.grepTimeBudgetMs,
-      });
+      };
+      await maybeAutoReindex(runtime, "dirty");
+      let result = runtime.finder.grep(query, grepOptions);
 
       if (!result.ok) throw new Error(result.error);
+      if (result.value.items.length === 0 && await maybeAutoReindex(runtime, "miss")) {
+        result = runtime.finder.grep(query, grepOptions);
+        if (!result.ok) throw new Error(result.error);
+      }
       return content(formatGrepOutput(result.value, limit, params.path));
     },
   });
@@ -596,7 +658,7 @@ export default function piFffPrisema(pi: ExtensionAPI) {
 
       const limit = Math.max(1, params.limit ?? DEFAULT_GREP_LIMIT);
       const cursor = getCursor(params.cursor);
-      const result = runtime.finder.multiGrep({
+      const multiGrepOptions = {
         patterns: params.patterns,
         constraints: params.constraints,
         smartCase: true,
@@ -605,9 +667,15 @@ export default function piFffPrisema(pi: ExtensionAPI) {
         beforeContext: params.context ?? 0,
         afterContext: params.context ?? 0,
         timeBudgetMs: safeOptions.grepTimeBudgetMs,
-      });
+      };
+      await maybeAutoReindex(runtime, "dirty");
+      let result = runtime.finder.multiGrep(multiGrepOptions);
 
       if (!result.ok) throw new Error(result.error);
+      if (result.value.items.length === 0 && await maybeAutoReindex(runtime, "miss")) {
+        result = runtime.finder.multiGrep(multiGrepOptions);
+        if (!result.ok) throw new Error(result.error);
+      }
       return content(formatGrepOutput(result.value, limit));
     },
   });
