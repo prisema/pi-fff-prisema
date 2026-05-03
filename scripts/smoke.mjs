@@ -161,6 +161,12 @@ async function smokePiTools(fixture) {
     });
     assert(multiOutput.includes("registerTool"), `fff-multi-grep constraint failed:\n${multiOutput}`);
 
+    const doctor = harness.commands.get("fff-prisema-doctor");
+    assert(doctor, "missing registered command: fff-prisema-doctor");
+    await doctor.handler("", harness.ctx);
+    const doctorWidget = harness.uiEvents.find((event) => event.kind === "widget" && event.name === "fff-prisema-doctor");
+    assert(doctorWidget?.lines?.some((line) => line.includes("pi-fff-prisema doctor")), "fff-prisema-doctor widget missing");
+
     return {
       registeredTools: [...harness.tools.keys()],
       findOutput,
@@ -171,6 +177,7 @@ async function smokePiTools(fixture) {
       grepGlob,
       grepRegex,
       multiOutput,
+      doctorOutput: doctorWidget.lines,
     };
   } finally {
     await harness.handlers.get("session_shutdown")?.();

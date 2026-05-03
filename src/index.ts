@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { existsSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { FileFinder } from "@ff-labs/fff-node";
 import type { GrepCursor, GrepMode, GrepResult, SearchResult } from "@ff-labs/fff-node";
 import { Type } from "typebox";
@@ -37,6 +38,17 @@ type ToolNames = {
   find: string;
   grep: string;
   multiGrep: string;
+};
+
+type PackageMatch = {
+  scope: "global" | "project";
+  kind: "prisema" | "legacy";
+  source: string;
+};
+
+type DoctorReport = {
+  lines: string[];
+  warnings: string[];
 };
 
 const cursorCache = new Map<string, GrepCursor>();
@@ -234,6 +246,94 @@ function toolNamesFromPrefix(prefix: string): ToolNames {
   };
 }
 
+function settingsPackages(settingsPath: string): string[] {
+  if (!existsSync(settingsPath)) return [];
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(settingsPath, "utf8"));
+    const packages = parsed && typeof parsed === "object" && "packages" in parsed ? parsed.packages : null;
+    if (!Array.isArray(packages)) return [];
+
+    return packages
+      .map((entry: unknown) => {
+        if (typeof entry === "string") return entry;
+        if (entry && typeof entry === "object" && "source" in entry && typeof entry.source === "string") return entry.source;
+        return null;
+      })
+      .filter((source): source is string => source !== null);
+  } catch {
+    return [];
+  }
+}
+
+function sourceLooksLocal(source: string): boolean {
+  return !/^[a-z][a-z0-9+.-]*:/iu.test(source);
+}
+
+function resolveSourcePath(source: string, settingsPath: string): string | null {
+  if (!sourceLooksLocal(source)) return null;
+  return isAbsolute(source) ? resolve(source) : resolve(dirname(settingsPath), source);
+}
+
+function findPackageMatches(settingsPath: string, scope: PackageMatch["scope"]): PackageMatch[] {
+  const matches: PackageMatch[] = [];
+
+  for (const source of settingsPackages(settingsPath)) {
+    const resolvedSource = resolveSourcePath(source, settingsPath);
+    const haystack = `${source}\n${resolvedSource ?? ""}`;
+
+    if (source.startsWith("npm:@ff-labs/pi-fff")) {
+      matches.push({ scope, kind: "legacy", source });
+    } else if (haystack.includes("pi-fff-prisema") || haystack.includes("pi-pff-prisema")) {
+      matches.push({ scope, kind: "prisema", source });
+    }
+  }
+
+  return matches;
+}
+
+function doctorReport(cwd: string, safeOptions: SafeOptions, state: RuntimeState | null, tools: ToolNames): DoctorReport {
+  const globalSettings = join(homedir(), ".pi", "agent", "settings.json");
+  const projectSettings = join(cwd, ".pi", "settings.json");
+  const matches = [
+    ...findPackageMatches(globalSettings, "global"),
+    ...findPackageMatches(projectSettings, "project"),
+  ];
+  const prisemaSources = matches.filter((match) => match.kind === "prisema");
+  const legacySources = matches.filter((match) => match.kind === "legacy");
+
+  const warnings: string[] = [];
+  if (legacySources.length > 0) warnings.push("legacy npm:@ff-labs/pi-fff installed; remove to avoid fffind/ffgrep collisions");
+  if (prisemaSources.length > 1) warnings.push("multiple pi-fff-prisema sources installed; keep only GitHub/global or local-dev source");
+  if (prisemaSources.some((match) => match.scope === "project")) warnings.push("project-local pi-fff-prisema source overrides global source");
+  if (!safeOptions.disableWatch) warnings.push("PI_FFF_PRISEMA_DISABLE_WATCH=0; native watcher enabled");
+  if (!safeOptions.disableMmapCache) warnings.push("PI_FFF_PRISEMA_DISABLE_MMAP_CACHE=0; mmap cache enabled");
+  if (!safeOptions.disableContentIndexing) warnings.push("PI_FFF_PRISEMA_DISABLE_CONTENT_INDEXING=0; content index enabled");
+  if (safeOptions.aiMode) warnings.push("PI_FFF_PRISEMA_AI_MODE=1; frecency/history mode enabled");
+  if (state?.scanTimedOut) warnings.push("initial FFF scan timed out; results may be incomplete until /fff-prisema-reindex");
+
+  const lines = [
+    warnings.length === 0 ? "pi-fff-prisema doctor: ok" : "pi-fff-prisema doctor: warnings",
+    `cwd=${cwd}`,
+    `globalSettings=${globalSettings}${existsSync(globalSettings) ? "" : " (missing)"}`,
+    `projectSettings=${projectSettings}${existsSync(projectSettings) ? "" : " (missing)"}`,
+    `tools=${tools.find}, ${tools.grep}, ${tools.multiGrep}`,
+    "package sources:",
+    ...(matches.length === 0 ? ["  none found in settings; ok if loaded via -e/autodiscovery"] : matches.map((match) => `  [${match.scope}] ${match.kind}: ${match.source}`)),
+    "safe options:",
+    `  aiMode=${safeOptions.aiMode}`,
+    `  disableMmapCache=${safeOptions.disableMmapCache}`,
+    `  disableContentIndexing=${safeOptions.disableContentIndexing}`,
+    `  disableWatch=${safeOptions.disableWatch}`,
+  ];
+
+  if (warnings.length > 0) {
+    lines.push("warnings:", ...warnings.map((warning) => `  - ${warning}`));
+    lines.push("fix:", "  normal: bash scripts/install-global.sh", "  dev: bash scripts/install-local.sh", "  restart Pi after install");
+  }
+
+  return { lines, warnings };
+}
+
 export default function piFffPrisema(pi: ExtensionAPI) {
   pi.registerFlag("fff-prisema-prefix", {
     description: "Prefix for pi-fff-prisema tools. Empty registers fffind/ffgrep/fff-multi-grep.",
@@ -341,9 +441,16 @@ export default function piFffPrisema(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     activeCwd = ctx.cwd;
-    void ensureFinder(activeCwd).catch((error) => {
-      ctx.ui.notify(`pi-fff-prisema init failed: ${error instanceof Error ? error.message : String(error)}`, "error");
-    });
+    void ensureFinder(activeCwd)
+      .then((runtime) => {
+        const report = doctorReport(activeCwd, safeOptions, runtime, tools);
+        if (report.warnings.length > 0) {
+          ctx.ui.notify(`pi-fff-prisema doctor found ${report.warnings.length} warning(s). Run /fff-prisema-doctor.`, "warning");
+        }
+      })
+      .catch((error) => {
+        ctx.ui.notify(`pi-fff-prisema init failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      });
   });
 
   pi.on("session_shutdown", async () => {
@@ -355,6 +462,17 @@ export default function piFffPrisema(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       await ensureFinder(activeCwd);
       ctx.ui.setWidget("fff-prisema-status", statusLines());
+    },
+  });
+
+  pi.registerCommand("fff-prisema-doctor", {
+    description: "Validate pi-fff-prisema package sources and safe runtime options",
+    handler: async (_args, ctx) => {
+      const runtime = await ensureFinder(activeCwd);
+      const report = doctorReport(activeCwd, safeOptions, runtime, tools);
+      ctx.ui.setWidget("fff-prisema-doctor", report.lines);
+      const ok = report.warnings.length === 0;
+      ctx.ui.notify(ok ? "pi-fff-prisema doctor ok" : `pi-fff-prisema doctor found ${report.warnings.length} warning(s)`, ok ? "info" : "warning");
     },
   });
 

@@ -49,6 +49,7 @@ Não carrega autocomplete `@` customizado. Intencional: menor superfície de FD 
 ## Comandos
 
 - `/fff-prisema-status` — mostra cwd, indexed files e opções seguras.
+- `/fff-prisema-doctor` — valida fontes instaladas, colisões com `@ff-labs/pi-fff` e flags inseguras.
 - `/fff-prisema-reindex` — força rescan do projeto atual.
 - `/fff-prisema-dispose` — destrói runtime atual; próxima busca reinicializa.
 
