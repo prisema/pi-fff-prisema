@@ -52,27 +52,35 @@ Não carrega autocomplete `@` customizado. Intencional: menor superfície de FD 
 - `/fff-prisema-reindex` — força rescan do projeto atual.
 - `/fff-prisema-dispose` — destrói runtime atual; próxima busca reinicializa.
 
-## Instalação local
+## Instalação
 
-Caminho curto:
+### Uso normal/global via GitHub
+
+```bash
+cd /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema
+bash scripts/install-global.sh
+```
+
+Esse caminho instala `git:github.com/prisema/pi-fff-prisema` no settings global do Pi (`~/.pi/agent/settings.json`). O checkout local só é usado para preflight (`bun install`, typecheck e smoke).
+
+### Desenvolvimento local
 
 ```bash
 cd /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema
 bash scripts/install-local.sh
 ```
 
-Manual:
+Esse caminho também escreve no settings global do Pi, mas a fonte instalada é este checkout por path local. Útil para testar mudanças locais antes de publicar. Não escreve `.pi/settings.json` do projeto.
+
+### Diagnóstico
 
 ```bash
-cd /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema
-bun install
-bun run typecheck
-bun run smoke /Users/rizzao/Projetos/MeusProjetos/vindula
-pi remove npm:@ff-labs/pi-fff
-pi install /Users/rizzao/Projetos/MeusProjetos/pi-fff-prisema
+bun run doctor
 ```
 
-Reinicie Pi.
+O doctor avisa se faltar dependência local, se `npm:@ff-labs/pi-fff` ainda estiver instalado, ou se houver fontes duplicadas (`git` + path local) registrando as mesmas tools.
+
+Reinicie Pi após instalar e rode `/fff-prisema-status`.
 
 ## Instalar sem colidir com `@ff-labs/pi-fff`
 

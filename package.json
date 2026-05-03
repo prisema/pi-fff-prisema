@@ -19,7 +19,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "smoke": "bun scripts/smoke.mjs"
+    "smoke": "bun scripts/smoke.mjs",
+    "doctor": "bun scripts/doctor.mjs"
   },
   "dependencies": {
     "@ff-labs/fff-node": "0.6.4"
