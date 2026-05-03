@@ -1,4 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { existsSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import { FileFinder } from "@ff-labs/fff-node";
 import type { GrepCursor, GrepMode, GrepResult, SearchResult } from "@ff-labs/fff-node";
 import { Type } from "typebox";
@@ -90,10 +92,49 @@ function buildFindQuery(pattern: string, path?: string): string {
   return `${normalizedPath} ${normalizedPattern}`;
 }
 
-function buildGrepQuery(pattern: string, path?: string): string {
+function normalizeGrepPath(path: string): string {
+  const trimmed = path.trim().replace(/^\.\//, "").replace(/^\/+/, "");
+  if (!trimmed || trimmed === ".") return "";
+  if (trimmed.includes("*")) return trimmed.replace(/\/+$/, "");
+
+  const hadTrailingSlash = /\/+$/u.test(trimmed);
+  const normalized = trimmed.replace(/\/+$/, "");
+  return hadTrailingSlash ? `${normalized}/` : normalized;
+}
+
+function pathStat(cwd: string, relativePath: string) {
+  if (!relativePath || relativePath.includes("*")) return null;
+  try {
+    const fullPath = resolve(cwd, relativePath.replace(/\/+$/, ""));
+    return existsSync(fullPath) ? statSync(fullPath) : null;
+  } catch {
+    return null;
+  }
+}
+
+function extensionGlob(relativePath: string): string | null {
+  const filename = relativePath.split("/").pop() ?? "";
+  const dotIndex = filename.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex === filename.length - 1) return null;
+  return `*.${filename.slice(dotIndex + 1)}`;
+}
+
+function buildGrepQuery(pattern: string, path?: string, cwd = process.cwd()): string {
   const normalizedPattern = pattern.trim();
-  const normalizedPath = path ? normalizeDirPath(path) : "";
+  const normalizedPath = path ? normalizeGrepPath(path) : "";
   if (!normalizedPath || normalizedPath === ".") return normalizedPattern;
+  if (normalizedPath.includes("*")) return `${normalizedPath} ${normalizedPattern}`;
+
+  const stat = pathStat(cwd, normalizedPath);
+  if (normalizedPath.endsWith("/") || stat?.isDirectory()) {
+    return `${normalizedPath.replace(/\/+$/, "")}/ ${normalizedPattern}`;
+  }
+
+  if (stat?.isFile()) {
+    const broadConstraint = normalizedPath.includes("/") ? `${normalizedPath}*` : extensionGlob(normalizedPath);
+    return broadConstraint ? `${broadConstraint} ${normalizedPattern}` : normalizedPattern;
+  }
+
   return `${normalizedPath} ${normalizedPattern}`;
 }
 
@@ -127,8 +168,9 @@ function truncateLine(line: string, max = 500): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max)}...`;
 }
 
-function formatGrepOutput(result: GrepResult, limit: number): string {
-  const items = result.items.slice(0, limit);
+function formatGrepOutput(result: GrepResult, limit: number, path?: string): string {
+  const shouldFilterPath = path ? !normalizeGrepPath(path).includes("*") : false;
+  const items = (shouldFilterPath ? result.items.filter((item) => pathMatches(item.relativePath, path)) : result.items).slice(0, limit);
   if (items.length === 0) return "No matches found";
 
   const lines: string[] = [];
@@ -393,7 +435,7 @@ export default function piFffPrisema(pi: ExtensionAPI) {
       const limit = Math.max(1, params.limit ?? DEFAULT_GREP_LIMIT);
       const mode: GrepMode = params.literal === false ? "regex" : "plain";
       const cursor = getCursor(params.cursor);
-      const result = runtime.finder.grep(buildGrepQuery(params.pattern, params.path), {
+      const result = runtime.finder.grep(buildGrepQuery(params.pattern, params.path, runtime.cwd), {
         mode,
         smartCase: true,
         cursor: cursor ?? null,
@@ -404,7 +446,7 @@ export default function piFffPrisema(pi: ExtensionAPI) {
       });
 
       if (!result.ok) throw new Error(result.error);
-      return content(formatGrepOutput(result.value, limit));
+      return content(formatGrepOutput(result.value, limit, params.path));
     },
   });
 
